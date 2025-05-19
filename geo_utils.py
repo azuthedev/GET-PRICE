@@ -1,10 +1,12 @@
 import math
 import json
 import logging
-from rtree import index
-from shapely.geometry import LineString, Point, shape
-from typing import Dict, Tuple, List, Any, Optional
 import os
+import requests
+import polyline
+from rtree import index
+from shapely.geometry import LineString, Point, shape, mapping
+from typing import Dict, Tuple, List, Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -18,15 +20,12 @@ def load_geo_data(geojson_path: str = "data/editedITprov.geojson") -> Dict[str, 
     Returns:
         Dictionary containing loaded geo data including R-tree index
     """
-    # Create data directory if it doesn't exist
-    os.makedirs(os.path.dirname(geojson_path), exist_ok=True)
-    
-    # Check if the GeoJSON file exists
-    if not os.path.exists(geojson_path):
-        logger.warning(f"GeoJSON file not found at {geojson_path}. Creating sample data.")
-        create_sample_geojson(geojson_path)
-    
     try:
+        # Check if the GeoJSON file exists
+        if not os.path.exists(geojson_path):
+            logger.error(f"GeoJSON file not found at {geojson_path}")
+            return create_emergency_geo_data()
+        
         # Load the GeoJSON data
         with open(geojson_path, 'r') as f:
             geojson_data = json.load(f)
@@ -113,65 +112,6 @@ def create_emergency_geo_data() -> Dict[str, Any]:
         'geojson': geojson_data
     }
 
-def create_sample_geojson(file_path: str) -> None:
-    """
-    Create a sample GeoJSON file with a few Italian provinces for testing
-    
-    Args:
-        file_path: Path where the sample GeoJSON will be saved
-    """
-    sample_geojson = {
-        "type": "FeatureCollection",
-        "features": [
-            {
-                "type": "Feature",
-                "properties": {
-                    "prov_istat": "RM",
-                    "prov_name": "Rome",
-                    "prov_acr": "RM",
-                    "region": "Lazio"
-                },
-                "geometry": {
-                    "type": "Polygon",
-                    "coordinates": [[[12.2, 41.7], [12.8, 41.7], [12.8, 42.2], [12.2, 42.2], [12.2, 41.7]]]
-                }
-            },
-            {
-                "type": "Feature",
-                "properties": {
-                    "prov_istat": "MI",
-                    "prov_name": "Milan",
-                    "prov_acr": "MI",
-                    "region": "Lombardy"
-                },
-                "geometry": {
-                    "type": "Polygon",
-                    "coordinates": [[[9.0, 45.3], [9.5, 45.3], [9.5, 45.7], [9.0, 45.7], [9.0, 45.3]]]
-                }
-            },
-            {
-                "type": "Feature",
-                "properties": {
-                    "prov_istat": "FI",
-                    "prov_name": "Florence",
-                    "prov_acr": "FI",
-                    "region": "Tuscany"
-                },
-                "geometry": {
-                    "type": "Polygon",
-                    "coordinates": [[[11.0, 43.7], [11.5, 43.7], [11.5, 44.0], [11.0, 44.0], [11.0, 43.7]]]
-                }
-            }
-        ]
-    }
-    
-    try:
-        with open(file_path, 'w') as f:
-            json.dump(sample_geojson, f)
-        logger.info(f"Created sample GeoJSON at {file_path}")
-    except Exception as e:
-        logger.error(f"Error creating sample GeoJSON: {str(e)}")
-
 def haversine_distance(coord1: Tuple[float, float], coord2: Tuple[float, float]) -> float:
     """
     Calculate the great-circle distance between two coordinates
@@ -220,6 +160,96 @@ def calculate_distance(pickup: Tuple[float, float], dropoff: Tuple[float, float]
     # In production, consider using OSRM for more accurate driving distance
     return haversine_distance(pickup, dropoff)
 
+def get_mapbox_route(
+    pickup: Tuple[float, float],
+    dropoff: Tuple[float, float],
+    depart_at: str = None
+) -> Dict[str, Any]:
+    """
+    Get route information from Mapbox API
+    
+    Args:
+        pickup: (latitude, longitude) of pickup
+        dropoff: (latitude, longitude) of dropoff
+        depart_at: ISO format datetime string for departure time
+    
+    Returns:
+        Dictionary with route information including distance, duration, and geometry
+    """
+    try:
+        mapbox_api_key = os.getenv("MAPBOX_API_KEY")
+        
+        if not mapbox_api_key:
+            logger.error("MAPBOX_API_KEY not found in environment variables")
+            return None
+        
+        # Format coordinates with 5 decimal points
+        pickup_lng = format(pickup[1], '.5f')
+        pickup_lat = format(pickup[0], '.5f')
+        dropoff_lng = format(dropoff[1], '.5f')
+        dropoff_lat = format(dropoff[0], '.5f')
+        
+        # Build URL
+        base_url = f"https://api.mapbox.com/directions/v5/mapbox/driving/{pickup_lng},{pickup_lat};{dropoff_lng},{dropoff_lat}"
+        
+        params = {
+            "alternatives": "false",
+            "geometries": "polyline",
+            "language": "en",
+            "overview": "full",
+            "steps": "true",
+            "access_token": mapbox_api_key
+        }
+        
+        # Add departure time if provided
+        if depart_at:
+            params["depart_at"] = depart_at
+        
+        response = requests.get(base_url, params=params)
+        
+        if response.status_code != 200:
+            logger.error(f"Mapbox API error: {response.status_code} - {response.text}")
+            return None
+        
+        data = response.json()
+        
+        if not data.get("routes") or len(data["routes"]) == 0:
+            logger.error("No routes found in Mapbox response")
+            return None
+        
+        route = data["routes"][0]
+        
+        return {
+            "distance": route["distance"] / 1000,  # Convert meters to kilometers
+            "duration": route["duration"] / 60,    # Convert seconds to minutes
+            "geometry": route["geometry"]
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting Mapbox route: {str(e)}")
+        return None
+
+def decode_polyline_to_coordinates(encoded_polyline: str) -> List[Tuple[float, float]]:
+    """
+    Decode a polyline string to a list of coordinates
+    
+    Args:
+        encoded_polyline: Encoded polyline string from Mapbox
+    
+    Returns:
+        List of (latitude, longitude) tuples
+    """
+    try:
+        # Decode polyline
+        coords = polyline.decode(encoded_polyline)
+        
+        # Mapbox returns coordinates as (lat, lng)
+        return coords
+        
+    except Exception as e:
+        logger.error(f"Error decoding polyline: {str(e)}")
+        return []
+
 def interpolate_points(start: Tuple[float, float], end: Tuple[float, float], num_points: int = 10) -> List[Tuple[float, float]]:
     """
     Generate interpolated points along a straight line between start and end coordinates
@@ -244,7 +274,8 @@ def calculate_route_segments(
     pickup: Tuple[float, float], 
     dropoff: Tuple[float, float], 
     num_segments: int = 10,
-    use_osrm: bool = False
+    use_mapbox: bool = True,
+    depart_at: str = None
 ) -> List[Tuple[float, float]]:
     """
     Calculate route segments between pickup and dropoff
@@ -253,7 +284,8 @@ def calculate_route_segments(
         pickup: (latitude, longitude) of pickup
         dropoff: (latitude, longitude) of dropoff
         num_segments: Number of segments to create
-        use_osrm: Whether to use OSRM for routing (if available)
+        use_mapbox: Whether to use Mapbox API for routing
+        depart_at: ISO format datetime string for departure time
         
     Returns:
         List of (latitude, longitude) points along the route
@@ -266,17 +298,26 @@ def calculate_route_segments(
     if haversine_distance(pickup, dropoff) < 0.1:  # Less than 100 meters
         return [pickup, dropoff]
     
-    # In the future, add OSRM support here
-    if use_osrm:
+    # Try using Mapbox API if requested
+    if use_mapbox:
         try:
-            # This is a placeholder for future OSRM integration
-            # Example implementation:
-            # return get_osrm_route(pickup, dropoff)
-            logger.info("OSRM routing requested but not yet implemented")
+            mapbox_route = get_mapbox_route(pickup, dropoff, depart_at)
+            
+            if mapbox_route and mapbox_route.get("geometry"):
+                route_points = decode_polyline_to_coordinates(mapbox_route["geometry"])
+                
+                if route_points and len(route_points) > 1:
+                    logger.info(f"Using Mapbox route with {len(route_points)} points")
+                    return route_points
+                else:
+                    logger.warning("Mapbox returned empty or invalid route, falling back to linear interpolation")
+            else:
+                logger.warning("No valid geometry found in Mapbox response, falling back to linear interpolation")
         except Exception as e:
-            logger.warning(f"OSRM routing failed, falling back to linear interpolation: {str(e)}")
+            logger.error(f"Error using Mapbox routing: {str(e)}, falling back to linear interpolation")
     
-    # For now, use linear interpolation
+    # Fallback to linear interpolation
+    logger.info("Using linear interpolation for route")
     return interpolate_points(pickup, dropoff, num_segments)
 
 def determine_zones_crossed(route_points: List[Tuple[float, float]], geo_data: Dict[str, Any]) -> Dict[str, float]:
@@ -331,6 +372,10 @@ def determine_zones_crossed(route_points: List[Tuple[float, float]], geo_data: D
             end = route_points[i + 1]
             
             segment_distance = haversine_distance(start, end)
+            
+            # Skip extremely short segments
+            if segment_distance < 0.001:  # Less than 1 meter
+                continue
             
             # Create a LineString geometry for this segment
             segment = LineString([(start[1], start[0]), (end[1], end[0])])

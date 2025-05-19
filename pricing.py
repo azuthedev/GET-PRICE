@@ -8,7 +8,8 @@ from geo_utils import (
     calculate_distance, 
     determine_zones_crossed, 
     calculate_route_segments,
-    check_fixed_price
+    check_fixed_price,
+    get_mapbox_route
 )
 
 logger = logging.getLogger(__name__)
@@ -93,11 +94,50 @@ def calculate_price(
             result["price_details"]["fixed_price_applied"] = True
             return result["price"], result["currency"]
         
-        # 1. Calculate route and distance
-        total_distance = calculate_distance(
+        # Format pickup_time for Mapbox API
+        depart_at = pickup_time.strftime("%Y-%m-%dT%H:%M")
+        
+        # 1. Get route information from Mapbox
+        mapbox_route = get_mapbox_route(
             (pickup_lat, pickup_lng),
-            (dropoff_lat, dropoff_lng)
+            (dropoff_lat, dropoff_lng),
+            depart_at=depart_at
         )
+        
+        # Initialize total distance
+        total_distance = 0
+        route_points = []
+        
+        # If we got a valid Mapbox route, use its distance
+        if mapbox_route and 'distance' in mapbox_route:
+            total_distance = mapbox_route['distance']  # Already in kilometers
+            result["price_details"]["mapbox_distance_used"] = True
+            result["price_details"]["estimated_duration_min"] = mapbox_route.get('duration', 0)
+            
+            # Get route points for zone calculations
+            if 'geometry' in mapbox_route:
+                route_points = calculate_route_segments(
+                    (pickup_lat, pickup_lng),
+                    (dropoff_lat, dropoff_lng),
+                    use_mapbox=True,
+                    depart_at=depart_at
+                )
+                result["price_details"]["mapbox_route_points"] = len(route_points)
+        else:
+            # Fallback to direct distance calculation
+            total_distance = calculate_distance(
+                (pickup_lat, pickup_lng),
+                (dropoff_lat, dropoff_lng)
+            )
+            result["price_details"]["direct_distance_used"] = True
+            
+            # Get route points through interpolation
+            route_points = calculate_route_segments(
+                (pickup_lat, pickup_lng),
+                (dropoff_lat, dropoff_lng),
+                num_segments=20,
+                use_mapbox=False
+            )
         
         # Apply round trip multiplier if needed
         if trip_type == "2":
@@ -150,13 +190,8 @@ def calculate_price(
         
         # 4. Determine which zones the route passes through
         try:
-            route_segments = calculate_route_segments(
-                (pickup_lat, pickup_lng),
-                (dropoff_lat, dropoff_lng),
-                num_segments=20
-            )
-            
-            zones_crossed = determine_zones_crossed(route_segments, geo_data)
+            # Use the route points we already obtained
+            zones_crossed = determine_zones_crossed(route_points, geo_data)
             result["price_details"]["zones_crossed"] = list(zones_crossed.keys())
         except Exception as e:
             logger.error(f"Error determining zones crossed: {str(e)}")
@@ -248,7 +283,7 @@ def calculate_price(
         price = round(price, 2)
         result["price"] = price
         
-        return price, config.currency
+        return price, result["currency"]
     
     except Exception as e:
         logger.error(f"Error calculating price: {str(e)}")

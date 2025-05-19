@@ -119,7 +119,10 @@ async def check_price(request: PriceRequest) -> Dict[str, Any]:
         # Calculate prices for all vehicle categories
         prices_list = []
         
-        for category in conf.vehicle_rates.keys():
+        # Define vehicle categories to calculate prices for
+        categories = [request.vehicle_category] if request.vehicle_category else conf.vehicle_rates.keys()
+        
+        for category in categories:
             price, curr = calculate_price(
                 pickup_lat=request.pickup_lat,
                 pickup_lng=request.pickup_lng,
