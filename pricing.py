@@ -79,7 +79,6 @@ def calculate_price(
             "base_price": 0,
             "zone_adjustments": {},
             "time_multiplier": 1.0,
-            "surge_multiplier": 1.0,
             "trip_type": "one-way" if trip_type == "1" else "round trip"
         }
     }
@@ -260,27 +259,6 @@ def calculate_price(
         
         price *= time_multiplier
         result["price_details"]["time_multiplier"] = time_multiplier
-        
-        # 8. Apply any surge multipliers based on time
-        current_surge = 1.0
-        applied_surge_name = None
-        
-        for surge_rule in config.surge_multipliers:
-            try:
-                start_time = datetime.fromisoformat(surge_rule["start_time"])
-                end_time = datetime.fromisoformat(surge_rule["end_time"])
-                
-                if start_time <= pickup_time <= end_time:
-                    if float(surge_rule["multiplier"]) > current_surge:
-                        current_surge = float(surge_rule["multiplier"])
-                        applied_surge_name = surge_rule["name"]
-            except Exception as e:
-                logger.error(f"Error processing surge rule: {str(e)}")
-        
-        price *= current_surge
-        result["price_details"]["surge_multiplier"] = current_surge
-        if applied_surge_name:
-            result["price_details"]["applied_surge"] = applied_surge_name
         
         # 9. Apply distance-based minimum fare if needed
         if price < distance_min_fare:

@@ -56,7 +56,6 @@ class Config:
         self.vehicle_rates = supabase_vehicle_rates if supabase_vehicle_rates else self._load_or_create_config('vehicle_rates.json', self._default_vehicle_rates())
         self.zone_multipliers = supabase_zone_multipliers if supabase_zone_multipliers else self._load_or_create_config('zone_multipliers.json', self._default_zone_multipliers())
         self.time_multipliers = self._load_or_create_config('time_multipliers.json', self._default_time_multipliers())
-        self.surge_multipliers = self._load_or_create_config('surge_multipliers.json', self._default_surge_multipliers())
         self.fixed_prices = supabase_fixed_prices if supabase_fixed_prices else self._load_or_create_config('fixed_prices.json', self._default_fixed_prices())
         self.min_fares = self._load_or_create_config('min_fares.json', self._default_min_fares())
         self.distance_based_min_fares = self._load_or_create_config('distance_based_min_fares.json', self._default_distance_based_min_fares())
@@ -124,23 +123,6 @@ class Config:
             "night": 1.25,  # 22:00 - 06:00
             "weekend": 1.15  # Saturday and Sunday
         }
-    
-    def _default_surge_multipliers(self) -> List[Dict[str, Any]]:
-        """Default surge multipliers for specific time periods"""
-        return [
-            {
-                "name": "New Year's Eve",
-                "start_time": "2023-12-31T18:00:00",
-                "end_time": "2024-01-01T06:00:00",
-                "multiplier": 1.5
-            },
-            {
-                "name": "Christmas",
-                "start_time": "2023-12-24T18:00:00",
-                "end_time": "2023-12-25T23:59:59",
-                "multiplier": 1.3
-            }
-        ]
     
     def _default_fixed_prices(self) -> List[Dict[str, Any]]:
         """Default fixed price overrides"""
@@ -275,24 +257,6 @@ class Config:
             if float(multiplier) <= 0:
                 logger.error(f"Multiplier for zone {zone} must be positive, got {multiplier}. Using default.")
                 self.zone_multipliers[zone] = self._default_zone_multipliers().get(zone, 1.0)
-        
-        # Validate surge times
-        valid_surges = []
-        for surge in self.surge_multipliers:
-            try:
-                start = datetime.fromisoformat(surge["start_time"])
-                end = datetime.fromisoformat(surge["end_time"])
-                if start >= end:
-                    logger.error(f"Surge {surge['name']} has start time after end time, skipping.")
-                    continue
-                if float(surge["multiplier"]) <= 0:
-                    logger.error(f"Surge {surge['name']} has non-positive multiplier, skipping.")
-                    continue
-                valid_surges.append(surge)
-            except (ValueError, KeyError) as e:
-                logger.error(f"Invalid surge configuration: {str(e)}, skipping.")
-        
-        self.surge_multipliers = valid_surges
         
         # Validate minimum fares
         for category, min_fare in self.min_fares.items():
