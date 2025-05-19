@@ -197,7 +197,7 @@ class Config:
             "coach_51_pax": 500.0
         }
     
-    def _default_distance_based_min_fares(self) -> Dict[str, Dict[str, Dict[str, float]]]:
+    def _default_distance_based_min_fares(self) -> Dict[str, Dict[str, float]]:
         """Default distance-based minimum fares for each vehicle category"""
         return {
             # 0 to 5 km

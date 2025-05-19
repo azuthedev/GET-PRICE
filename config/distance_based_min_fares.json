@@ -1,0 +1,38 @@
+{
+  "0-5": {
+    "standard_sedan": 65.0,
+    "premium_sedan": 70.0,
+    "vip_sedan": 120.0,
+    "standard_minivan": 75.0,
+    "xl_minivan": 80.0,
+    "vip_minivan": 85.0,
+    "sprinter_8_pax": 120.0,
+    "sprinter_16_pax": 180.0,
+    "sprinter_21_pax": 300.0,
+    "coach_51_pax": 500.0
+  },
+  "5-20": {
+    "standard_sedan": 90.0,
+    "premium_sedan": 100.0,
+    "vip_sedan": 150.0,
+    "standard_minivan": 100.0,
+    "xl_minivan": 110.0,
+    "vip_minivan": 120.0,
+    "sprinter_8_pax": 190.0,
+    "sprinter_16_pax": 240.0,
+    "sprinter_21_pax": 360.0,
+    "coach_51_pax": 600.0
+  },
+  "20-50": {
+    "standard_sedan": 120.0,
+    "premium_sedan": 130.0,
+    "vip_sedan": 200.0,
+    "standard_minivan": 125.0,
+    "xl_minivan": 135.0,
+    "vip_minivan": 145.0,
+    "sprinter_8_pax": 220.0,
+    "sprinter_16_pax": 300.0,
+    "sprinter_21_pax": 400.0,
+    "coach_51_pax": 800.0
+  }
+}
