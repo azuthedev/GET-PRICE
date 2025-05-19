@@ -6,11 +6,13 @@ A FastAPI-based pricing engine for calculating airport/city transfer prices.
 
 - Check price based on pickup and dropoff coordinates
 - Return prices for all vehicle categories as an array
+- Support for one-way and round trip options
 - Fixed price overrides for common routes
 - Distance-based minimum fares
 - Dynamic pricing based on distance, zones, and time
 - Spatial indexing for efficient zone lookups
 - Support for time-based pricing (night/weekend/holiday rates)
+- Price rounding to the nearest 10 EUR
 
 ## API Endpoints
 
@@ -27,7 +29,8 @@ Request body:
   "pickup_lng": 12.25,
   "dropoff_lat": 41.9,
   "dropoff_lng": 12.5,
-  "pickup_time": "2023-10-20T14:30:00"
+  "pickup_time": "2023-10-20T14:30:00",
+  "trip_type": "1"
 }
 ```
 
@@ -38,55 +41,64 @@ Response:
     {
       "category": "standard_sedan",
       "price": 65,
-      "currency": "EUR"
+      "currency": "EUR",
+      "final_price": 70
     },
     {
       "category": "premium_sedan",
       "price": 70,
-      "currency": "EUR"
+      "currency": "EUR",
+      "final_price": 70
     },
     {
       "category": "vip_sedan",
       "price": 120,
-      "currency": "EUR"
+      "currency": "EUR",
+      "final_price": 120
     },
     {
       "category": "standard_minivan",
       "price": 75,
-      "currency": "EUR"
+      "currency": "EUR",
+      "final_price": 80
     },
     {
       "category": "xl_minivan",
       "price": 80,
-      "currency": "EUR"
+      "currency": "EUR",
+      "final_price": 80
     },
     {
       "category": "vip_minivan",
       "price": 85,
-      "currency": "EUR"
+      "currency": "EUR",
+      "final_price": 90
     },
     {
       "category": "sprinter_8_pax",
       "price": 120,
-      "currency": "EUR"
+      "currency": "EUR",
+      "final_price": 120
     },
     {
       "category": "sprinter_16_pax",
       "price": 180,
-      "currency": "EUR"
+      "currency": "EUR",
+      "final_price": 180
     },
     {
       "category": "sprinter_21_pax",
       "price": 300,
-      "currency": "EUR"
+      "currency": "EUR",
+      "final_price": 300
     },
     {
       "category": "coach_51_pax",
       "price": 500,
-      "currency": "EUR"
+      "currency": "EUR",
+      "final_price": 500
     }
   ],
-  "selected_category": null,
   "details": {
     "pickup_time": "2023-10-20T14:30:00",
     "pickup_location": {
@@ -96,8 +108,21 @@ Response:
     "dropoff_location": {
       "lat": 41.9,
       "lng": 12.5
-    }
+    },
+    "trip_type": "one-way"
   }
+}
+```
+
+Example for round trip:
+```json
+{
+  "pickup_lat": 41.8,
+  "pickup_lng": 12.25,
+  "dropoff_lat": 41.9,
+  "dropoff_lng": 12.5,
+  "pickup_time": "2023-10-20T14:30:00",
+  "trip_type": "2"
 }
 ```
 

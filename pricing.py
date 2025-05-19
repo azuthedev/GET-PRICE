@@ -22,7 +22,8 @@ def get_cached_price_calc(
     vehicle_category: str,
     pickup_hour: int,
     pickup_weekday: int,
-    pickup_date_str: str
+    pickup_date_str: str,
+    trip_type: str
 ) -> Dict[str, Any]:
     """
     Cached version of price calculation to improve performance for repeated requests
@@ -46,7 +47,8 @@ def calculate_price(
     vehicle_category: str,
     pickup_time: datetime,
     config: Config,
-    geo_data: Dict[str, Any]
+    geo_data: Dict[str, Any],
+    trip_type: str = "1"
 ) -> Tuple[float, str]:
     """
     Calculate the price for a transfer based on the provided parameters.
@@ -60,6 +62,7 @@ def calculate_price(
         pickup_time: Time of pickup
         config: Configuration object containing pricing rules
         geo_data: Loaded geographic data including R-tree spatial index
+        trip_type: "1" for one-way, "2" for round trip
         
     Returns:
         Tuple containing (price, currency)
@@ -75,7 +78,8 @@ def calculate_price(
             "base_price": 0,
             "zone_adjustments": {},
             "time_multiplier": 1.0,
-            "surge_multiplier": 1.0
+            "surge_multiplier": 1.0,
+            "trip_type": "one-way" if trip_type == "1" else "round trip"
         }
     }
     
@@ -94,6 +98,11 @@ def calculate_price(
             (pickup_lat, pickup_lng),
             (dropoff_lat, dropoff_lng)
         )
+        
+        # Apply round trip multiplier if needed
+        if trip_type == "2":
+            total_distance *= 2
+            result["price_details"]["round_trip_applied"] = True
         
         result["price_details"]["total_distance_km"] = total_distance
         
@@ -121,6 +130,12 @@ def calculate_price(
         if fixed_price is not None:
             logger.info(f"Fixed price found: {fixed_price} {config.currency}")
             price = fixed_price
+            
+            # Apply round trip doubling for fixed prices too
+            if trip_type == "2":
+                price *= 2
+                logger.info(f"Applied round trip doubling to fixed price: {price} {config.currency}")
+                
             result["price_details"]["fixed_price_applied"] = True
             
             # Compare with distance-based minimum fare
@@ -161,16 +176,21 @@ def calculate_price(
         price = 0.0
         
         for zone_code, distance in zones_crossed.items():
+            # Apply round trip doubling if needed (this is actually already applied to total_distance)
+            zone_distance = distance
+            if trip_type == "2" and not result["price_details"].get("round_trip_applied"):
+                zone_distance *= 2
+            
             # Get multiplier for this zone (falls back to DEFAULT if not found)
             zone_multiplier = config.zone_multipliers.get(zone_code, 
                                config.zone_multipliers.get("DEFAULT", 1.0))
             
-            zone_price = base_rate * distance * zone_multiplier
+            zone_price = base_rate * zone_distance * zone_multiplier
             price += zone_price
             
             # Record details for this zone
             result["price_details"]["zone_adjustments"][zone_code] = {
-                "distance_km": distance,
+                "distance_km": zone_distance,
                 "multiplier": zone_multiplier,
                 "contribution": zone_price
             }

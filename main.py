@@ -5,8 +5,9 @@ from fastapi import FastAPI, HTTPException, Depends, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, validator
 from datetime import datetime
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Union
 from functools import lru_cache
+import math
 
 from config import Config
 from pricing import calculate_price
@@ -49,6 +50,7 @@ class PriceRequest(BaseModel):
     dropoff_lng: float = Field(..., description="Dropoff longitude", ge=-180, le=180)
     vehicle_category: Optional[str] = Field(None, description="Optional vehicle category (e.g., 'standard_sedan', 'premium_sedan')")
     pickup_time: datetime = Field(..., description="Pickup time in ISO8601 format")
+    trip_type: Union[str, int] = Field(..., description="Trip type: '1' for one-way, '2' for round trip")
     
     @validator('vehicle_category')
     def validate_vehicle_category(cls, v):
@@ -56,15 +58,30 @@ class PriceRequest(BaseModel):
         if v is not None:
             return v.lower()
         return v
+    
+    @validator('trip_type')
+    def validate_trip_type(cls, v):
+        """Validate trip_type is either '1' or '2'"""
+        if isinstance(v, int):
+            v = str(v)
+        
+        if v not in ["1", "2"]:
+            raise ValueError("trip_type must be '1' (one-way) or '2' (round trip)")
+        return v
 
 class VehiclePriceInfo(BaseModel):
     category: str
     price: float
     currency: str
+    final_price: float
 
 class PriceResponse(BaseModel):
     prices: List[VehiclePriceInfo]
     details: Optional[Dict[str, Any]] = None
+
+def round_up_to_nearest_10(price: float) -> float:
+    """Round the price up to the nearest 10 euros"""
+    return math.ceil(price / 10.0) * 10.0
 
 @lru_cache(maxsize=100)
 def get_config():
@@ -92,7 +109,8 @@ async def check_price(request: PriceRequest) -> Dict[str, Any]:
     Calculate the price for all vehicle categories based on pickup/dropoff coordinates
     """
     logger.info(f"Received price check request from "
-                f"({request.pickup_lat}, {request.pickup_lng}) to ({request.dropoff_lat}, {request.dropoff_lng})")
+                f"({request.pickup_lat}, {request.pickup_lng}) to ({request.dropoff_lat}, {request.dropoff_lng}) "
+                f"with trip_type={request.trip_type}")
     
     try:
         # Get fresh config
@@ -110,14 +128,19 @@ async def check_price(request: PriceRequest) -> Dict[str, Any]:
                 vehicle_category=category,
                 pickup_time=request.pickup_time,
                 config=conf,
-                geo_data=geo_data
+                geo_data=geo_data,
+                trip_type=request.trip_type
             )
+            
+            # Round up to the nearest 10 euros
+            final_price = round_up_to_nearest_10(price)
             
             prices_list.append(
                 VehiclePriceInfo(
                     category=category,
                     price=price,
-                    currency=curr
+                    currency=curr,
+                    final_price=final_price
                 )
             )
         
@@ -127,7 +150,8 @@ async def check_price(request: PriceRequest) -> Dict[str, Any]:
             "details": {
                 "pickup_time": request.pickup_time.isoformat(),
                 "pickup_location": {"lat": request.pickup_lat, "lng": request.pickup_lng},
-                "dropoff_location": {"lat": request.dropoff_lat, "lng": request.dropoff_lng}
+                "dropoff_location": {"lat": request.dropoff_lat, "lng": request.dropoff_lng},
+                "trip_type": "one-way" if request.trip_type == "1" else "round trip"
             }
         }
         
