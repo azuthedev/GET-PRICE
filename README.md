@@ -15,7 +15,7 @@ Request body:
   "pickup_lng": 12.25,
   "dropoff_lat": 41.9,
   "dropoff_lng": 12.5,
-  "vehicle_category": "economy",
+  "vehicle_category": "economy", \\ OPTIONAL
   "pickup_time": "2023-10-20T14:30:00"
 }
 ```
