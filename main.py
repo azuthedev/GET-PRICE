@@ -5,7 +5,7 @@ from fastapi import FastAPI, HTTPException, Depends, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, validator
 from datetime import datetime
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from functools import lru_cache
 
 from config import Config
@@ -47,17 +47,23 @@ class PriceRequest(BaseModel):
     pickup_lng: float = Field(..., description="Pickup longitude", ge=-180, le=180)
     dropoff_lat: float = Field(..., description="Dropoff latitude", ge=-90, le=90)
     dropoff_lng: float = Field(..., description="Dropoff longitude", ge=-180, le=180)
-    vehicle_category: str = Field(..., description="Vehicle category (e.g., 'economy', 'premium')")
+    vehicle_category: Optional[str] = Field(None, description="Optional vehicle category (e.g., 'standard_sedan', 'premium_sedan')")
     pickup_time: datetime = Field(..., description="Pickup time in ISO8601 format")
     
     @validator('vehicle_category')
     def validate_vehicle_category(cls, v):
-        """Validate vehicle category is lowercase"""
-        return v.lower()
+        """Validate vehicle category is lowercase if provided"""
+        if v is not None:
+            return v.lower()
+        return v
 
-class PriceResponse(BaseModel):
+class VehiclePriceInfo(BaseModel):
     price: float
     currency: str
+
+class PriceResponse(BaseModel):
+    prices: Dict[str, VehiclePriceInfo]
+    selected_category: Optional[str] = None
     details: Optional[Dict[str, Any]] = None
 
 @lru_cache(maxsize=100)
@@ -83,40 +89,44 @@ async def get_configuration():
 @app.post("/check-price", response_model=PriceResponse)
 async def check_price(request: PriceRequest) -> Dict[str, Any]:
     """
-    Calculate the price for a transfer based on pickup/dropoff coordinates
+    Calculate the price for all vehicle categories based on pickup/dropoff coordinates
     """
-    logger.info(f"Received price check request for {request.vehicle_category} from "
+    logger.info(f"Received price check request from "
                 f"({request.pickup_lat}, {request.pickup_lng}) to ({request.dropoff_lat}, {request.dropoff_lng})")
     
     try:
-        # Get fresh config and geo_data (potentially from cache)
+        # Get fresh config
         conf = get_config()
         
-        # Calculate price
-        price, currency = calculate_price(
-            pickup_lat=request.pickup_lat,
-            pickup_lng=request.pickup_lng,
-            dropoff_lat=request.dropoff_lat,
-            dropoff_lng=request.dropoff_lng,
-            vehicle_category=request.vehicle_category,
-            pickup_time=request.pickup_time,
-            config=conf,
-            geo_data=geo_data
-        )
+        # Calculate prices for all vehicle categories
+        all_prices = {}
+        for category in conf.vehicle_rates.keys():
+            price, curr = calculate_price(
+                pickup_lat=request.pickup_lat,
+                pickup_lng=request.pickup_lng,
+                dropoff_lat=request.dropoff_lat,
+                dropoff_lng=request.dropoff_lng,
+                vehicle_category=category,
+                pickup_time=request.pickup_time,
+                config=conf,
+                geo_data=geo_data
+            )
+            all_prices[category] = {
+                "price": price,
+                "currency": curr
+            }
         
         # Build detailed response
         response = {
-            "price": price,
-            "currency": currency,
+            "prices": all_prices,
+            "selected_category": request.vehicle_category,
             "details": {
-                "vehicle_category": request.vehicle_category,
                 "pickup_time": request.pickup_time.isoformat(),
-                "distance": None,  # Will be populated if available from price calculation
-                "zones_crossed": None,  # Will be populated if available from price calculation
+                "pickup_location": {"lat": request.pickup_lat, "lng": request.pickup_lng},
+                "dropoff_location": {"lat": request.dropoff_lat, "lng": request.dropoff_lng}
             }
         }
         
-        # Return the result
         return response
         
     except ValueError as e:
