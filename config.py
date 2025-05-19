@@ -120,8 +120,8 @@ class Config:
     def _default_time_multipliers(self) -> Dict[str, float]:
         """Default multipliers for different time periods"""
         return {
-            "night": 1.25,  # 22:00 - 06:00
-            "weekend": 1.15  # Saturday and Sunday
+            "night": 1.0,  # Setting to 1.0 instead of 1.25 (no multiplier effect)
+            "weekend": 1.0  # Setting to 1.0 instead of 1.15 (no multiplier effect)
         }
     
     def _default_fixed_prices(self) -> List[Dict[str, Any]]:

@@ -78,7 +78,6 @@ def calculate_price(
             "total_distance_km": 0,
             "base_price": 0,
             "zone_adjustments": {},
-            "time_multiplier": 1.0,
             "trip_type": "one-way" if trip_type == "1" else "round trip"
         }
     }
@@ -241,24 +240,7 @@ def calculate_price(
         
         result["price_details"]["base_price"] = price
         
-        # 7. Apply time-based multipliers
-        weekday = pickup_time.weekday()
-        hour = pickup_time.hour
-        
-        time_multiplier = 1.0
-        
-        # Check if it's a weekend
-        if weekday >= 5:  # 5 is Saturday, 6 is Sunday
-            time_multiplier *= config.time_multipliers.get("weekend", 1.0)
-            result["price_details"]["weekend_multiplier_applied"] = True
-        
-        # Check if it's night time
-        if hour < 6 or hour >= 22:
-            time_multiplier *= config.time_multipliers.get("night", 1.0)
-            result["price_details"]["night_multiplier_applied"] = True
-        
-        price *= time_multiplier
-        result["price_details"]["time_multiplier"] = time_multiplier
+        # Time-based multipliers removed as requested
         
         # 9. Apply distance-based minimum fare if needed
         if price < distance_min_fare:
