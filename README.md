@@ -40,63 +40,63 @@ Response:
   "prices": [
     {
       "category": "standard_sedan",
-      "price": 65,
+      "raw_price": 65,
       "currency": "EUR",
-      "final_price": 70
+      "price": 70
     },
     {
       "category": "premium_sedan",
-      "price": 70,
+      "raw_price": 70,
       "currency": "EUR",
-      "final_price": 70
+      "price": 70
     },
     {
       "category": "vip_sedan",
-      "price": 120,
+      "raw_price": 120,
       "currency": "EUR",
-      "final_price": 120
+      "price": 120
     },
     {
       "category": "standard_minivan",
-      "price": 75,
+      "raw_price": 75,
       "currency": "EUR",
-      "final_price": 80
+      "price": 80
     },
     {
       "category": "xl_minivan",
-      "price": 80,
+      "raw_price": 80,
       "currency": "EUR",
-      "final_price": 80
+      "price": 80
     },
     {
       "category": "vip_minivan",
-      "price": 85,
+      "raw_price": 85,
       "currency": "EUR",
-      "final_price": 90
+      "price": 90
     },
     {
       "category": "sprinter_8_pax",
-      "price": 120,
+      "raw_price": 120,
       "currency": "EUR",
-      "final_price": 120
+      "price": 120
     },
     {
       "category": "sprinter_16_pax",
-      "price": 180,
+      "raw_price": 180,
       "currency": "EUR",
-      "final_price": 180
+      "price": 180
     },
     {
       "category": "sprinter_21_pax",
-      "price": 300,
+      "raw_price": 300,
       "currency": "EUR",
-      "final_price": 300
+      "price": 300
     },
     {
       "category": "coach_51_pax",
-      "price": 500,
+      "raw_price": 500,
       "currency": "EUR",
-      "final_price": 500
+      "price": 500
     }
   ],
   "details": {

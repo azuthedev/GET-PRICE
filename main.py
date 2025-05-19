@@ -71,9 +71,9 @@ class PriceRequest(BaseModel):
 
 class VehiclePriceInfo(BaseModel):
     category: str
-    price: float
+    raw_price: float
     currency: str
-    final_price: float
+    price: float
 
 class PriceResponse(BaseModel):
     prices: List[VehiclePriceInfo]
@@ -136,14 +136,14 @@ async def check_price(request: PriceRequest) -> Dict[str, Any]:
             )
             
             # Round to the nearest 10 euros
-            final_price = round_to_nearest_10(price)
+            rounded_price = round_to_nearest_10(price)
             
             prices_list.append(
                 VehiclePriceInfo(
                     category=category,
-                    price=price,
+                    raw_price=price,
                     currency=curr,
-                    final_price=final_price
+                    price=rounded_price
                 )
             )
         
