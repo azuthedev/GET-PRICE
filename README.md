@@ -5,7 +5,7 @@ A FastAPI-based pricing engine for calculating airport/city transfer prices.
 ## Features
 
 - Check price based on pickup and dropoff coordinates
-- Return prices for all vehicle categories
+- Return prices for all vehicle categories as an array
 - Fixed price overrides for common routes
 - Distance-based minimum fares
 - Dynamic pricing based on distance, zones, and time
@@ -34,48 +34,58 @@ Request body:
 Response:
 ```json
 {
-  "prices": {
-    "standard_sedan": {
+  "prices": [
+    {
+      "category": "standard_sedan",
       "price": 65,
       "currency": "EUR"
     },
-    "premium_sedan": {
+    {
+      "category": "premium_sedan",
       "price": 70,
       "currency": "EUR"
     },
-    "vip_sedan": {
+    {
+      "category": "vip_sedan",
       "price": 120,
       "currency": "EUR"
     },
-    "standard_minivan": {
+    {
+      "category": "standard_minivan",
       "price": 75,
       "currency": "EUR"
     },
-    "xl_minivan": {
+    {
+      "category": "xl_minivan",
       "price": 80,
       "currency": "EUR"
     },
-    "vip_minivan": {
+    {
+      "category": "vip_minivan",
       "price": 85,
       "currency": "EUR"
     },
-    "sprinter_8_pax": {
+    {
+      "category": "sprinter_8_pax",
       "price": 120,
       "currency": "EUR"
     },
-    "sprinter_16_pax": {
+    {
+      "category": "sprinter_16_pax",
       "price": 180,
       "currency": "EUR"
     },
-    "sprinter_21_pax": {
+    {
+      "category": "sprinter_21_pax",
       "price": 300,
       "currency": "EUR"
     },
-    "coach_51_pax": {
+    {
+      "category": "coach_51_pax",
       "price": 500,
       "currency": "EUR"
     }
-  },
+  ],
   "selected_category": null,
   "details": {
     "pickup_time": "2023-10-20T14:30:00",

@@ -58,11 +58,12 @@ class PriceRequest(BaseModel):
         return v
 
 class VehiclePriceInfo(BaseModel):
+    category: str
     price: float
     currency: str
 
 class PriceResponse(BaseModel):
-    prices: Dict[str, VehiclePriceInfo]
+    prices: List[VehiclePriceInfo]
     selected_category: Optional[str] = None
     details: Optional[Dict[str, Any]] = None
 
@@ -99,7 +100,8 @@ async def check_price(request: PriceRequest) -> Dict[str, Any]:
         conf = get_config()
         
         # Calculate prices for all vehicle categories
-        all_prices = {}
+        prices_list = []
+        
         for category in conf.vehicle_rates.keys():
             price, curr = calculate_price(
                 pickup_lat=request.pickup_lat,
@@ -111,14 +113,18 @@ async def check_price(request: PriceRequest) -> Dict[str, Any]:
                 config=conf,
                 geo_data=geo_data
             )
-            all_prices[category] = {
-                "price": price,
-                "currency": curr
-            }
+            
+            prices_list.append(
+                VehiclePriceInfo(
+                    category=category,
+                    price=price,
+                    currency=curr
+                )
+            )
         
         # Build detailed response
         response = {
-            "prices": all_prices,
+            "prices": prices_list,
             "selected_category": request.vehicle_category,
             "details": {
                 "pickup_time": request.pickup_time.isoformat(),
