@@ -79,9 +79,9 @@ class PriceResponse(BaseModel):
     prices: List[VehiclePriceInfo]
     details: Optional[Dict[str, Any]] = None
 
-def round_up_to_nearest_10(price: float) -> float:
-    """Round the price up to the nearest 10 euros"""
-    return math.ceil(price / 10.0) * 10.0
+def round_to_nearest_10(price: float) -> float:
+    """Round the price to the nearest 10 euros for a premium look"""
+    return round(price / 10.0) * 10.0
 
 @lru_cache(maxsize=100)
 def get_config():
@@ -135,8 +135,8 @@ async def check_price(request: PriceRequest) -> Dict[str, Any]:
                 trip_type=request.trip_type
             )
             
-            # Round up to the nearest 10 euros
-            final_price = round_up_to_nearest_10(price)
+            # Round to the nearest 10 euros
+            final_price = round_to_nearest_10(price)
             
             prices_list.append(
                 VehiclePriceInfo(

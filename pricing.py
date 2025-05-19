@@ -139,25 +139,45 @@ def calculate_price(
                 use_mapbox=False
             )
         
-        # Apply round trip multiplier if needed
+        # Store one-way distance for reference
+        one_way_distance = total_distance
+        result["price_details"]["one_way_distance_km"] = one_way_distance
+        
+        # 3. Determine which zones the route passes through (before applying round trip)
+        try:
+            # Use the route points we already obtained
+            zones_crossed = determine_zones_crossed(route_points, geo_data)
+            result["price_details"]["zones_crossed"] = list(zones_crossed.keys())
+        except Exception as e:
+            logger.error(f"Error determining zones crossed: {str(e)}")
+            # Fall back to default zone
+            zones_crossed = {"DEFAULT": one_way_distance}
+            result["price_details"]["zones_crossed"] = ["DEFAULT"]
+            
+        # Apply round trip multiplier if needed - AFTER zone calculation
         if trip_type == "2":
             total_distance *= 2
             result["price_details"]["round_trip_applied"] = True
-        
+            
         result["price_details"]["total_distance_km"] = total_distance
         
         # 2. Check for distance-based minimum fare
         min_fare = config.min_fares.get(vehicle_category, 10.0)
         
-        # Apply distance-based minimum fares
-        if total_distance <= 5:
+        # Apply distance-based minimum fares based on one_way_distance
+        if one_way_distance <= 5:
             distance_min_fare = config.distance_based_min_fares.get("0-5", {}).get(vehicle_category, min_fare)
-        elif total_distance <= 20:
+        elif one_way_distance <= 20:
             distance_min_fare = config.distance_based_min_fares.get("5-20", {}).get(vehicle_category, min_fare)
-        elif total_distance <= 50:
+        elif one_way_distance <= 50:
             distance_min_fare = config.distance_based_min_fares.get("20-50", {}).get(vehicle_category, min_fare)
         else:
             distance_min_fare = min_fare  # Use regular min fare for distances > 50km
+            
+        # Double the minimum fare for round trips
+        if trip_type == "2":
+            distance_min_fare *= 2
+            result["price_details"]["min_fare_doubled"] = True
         
         # 3. Check for fixed price override
         fixed_price = check_fixed_price(
@@ -188,17 +208,6 @@ def calculate_price(
             result["price"] = price
             return price, result["currency"]
         
-        # 4. Determine which zones the route passes through
-        try:
-            # Use the route points we already obtained
-            zones_crossed = determine_zones_crossed(route_points, geo_data)
-            result["price_details"]["zones_crossed"] = list(zones_crossed.keys())
-        except Exception as e:
-            logger.error(f"Error determining zones crossed: {str(e)}")
-            # Fall back to default zone
-            zones_crossed = {"DEFAULT": total_distance}
-            result["price_details"]["zones_crossed"] = ["DEFAULT"]
-        
         # 5. Calculate base price based on vehicle category and distance
         if vehicle_category not in config.vehicle_rates:
             logger.warning(f"Unknown vehicle category: {vehicle_category}, using default")
@@ -211,23 +220,24 @@ def calculate_price(
         price = 0.0
         
         for zone_code, distance in zones_crossed.items():
-            # Apply round trip doubling if needed (this is actually already applied to total_distance)
-            zone_distance = distance
-            if trip_type == "2" and not result["price_details"].get("round_trip_applied"):
-                zone_distance *= 2
-            
             # Get multiplier for this zone (falls back to DEFAULT if not found)
             zone_multiplier = config.zone_multipliers.get(zone_code, 
                                config.zone_multipliers.get("DEFAULT", 1.0))
             
-            zone_price = base_rate * zone_distance * zone_multiplier
+            zone_price = base_rate * distance * zone_multiplier
+            
+            # Apply round trip doubling to each zone price if needed
+            if trip_type == "2":
+                zone_price *= 2
+                
             price += zone_price
             
             # Record details for this zone
             result["price_details"]["zone_adjustments"][zone_code] = {
-                "distance_km": zone_distance,
+                "distance_km": distance,
                 "multiplier": zone_multiplier,
-                "contribution": zone_price
+                "contribution": zone_price,
+                "doubled_for_round_trip": trip_type == "2"
             }
         
         result["price_details"]["base_price"] = price
@@ -291,6 +301,9 @@ def calculate_price(
         min_fare = 15.0
         try:
             min_fare = config.min_fares.get(vehicle_category, 15.0)
+            # Double the minimum fare for round trips
+            if trip_type == "2":
+                min_fare *= 2
         except:
             pass
         
