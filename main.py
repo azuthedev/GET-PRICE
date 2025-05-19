@@ -64,7 +64,6 @@ class VehiclePriceInfo(BaseModel):
 
 class PriceResponse(BaseModel):
     prices: List[VehiclePriceInfo]
-    selected_category: Optional[str] = None
     details: Optional[Dict[str, Any]] = None
 
 @lru_cache(maxsize=100)
@@ -125,7 +124,6 @@ async def check_price(request: PriceRequest) -> Dict[str, Any]:
         # Build detailed response
         response = {
             "prices": prices_list,
-            "selected_category": request.vehicle_category,
             "details": {
                 "pickup_time": request.pickup_time.isoformat(),
                 "pickup_location": {"lat": request.pickup_lat, "lng": request.pickup_lng},
