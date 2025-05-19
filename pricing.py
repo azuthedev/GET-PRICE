@@ -89,7 +89,28 @@ def calculate_price(
             result["price_details"]["fixed_price_applied"] = True
             return result["price"], result["currency"]
         
-        # 1. Check for fixed price override
+        # 1. Calculate route and distance
+        total_distance = calculate_distance(
+            (pickup_lat, pickup_lng),
+            (dropoff_lat, dropoff_lng)
+        )
+        
+        result["price_details"]["total_distance_km"] = total_distance
+        
+        # 2. Check for distance-based minimum fare
+        min_fare = config.min_fares.get(vehicle_category, 10.0)
+        
+        # Apply distance-based minimum fares
+        if total_distance <= 5:
+            distance_min_fare = config.distance_based_min_fares.get("0-5", {}).get(vehicle_category, min_fare)
+        elif total_distance <= 20:
+            distance_min_fare = config.distance_based_min_fares.get("5-20", {}).get(vehicle_category, min_fare)
+        elif total_distance <= 50:
+            distance_min_fare = config.distance_based_min_fares.get("20-50", {}).get(vehicle_category, min_fare)
+        else:
+            distance_min_fare = min_fare  # Use regular min fare for distances > 50km
+        
+        # 3. Check for fixed price override
         fixed_price = check_fixed_price(
             (pickup_lat, pickup_lng),
             (dropoff_lat, dropoff_lng),
@@ -99,24 +120,25 @@ def calculate_price(
         
         if fixed_price is not None:
             logger.info(f"Fixed price found: {fixed_price} {config.currency}")
-            result["price"] = fixed_price
+            price = fixed_price
             result["price_details"]["fixed_price_applied"] = True
-            return result["price"], result["currency"]
+            
+            # Compare with distance-based minimum fare
+            if price < distance_min_fare:
+                price = distance_min_fare
+                result["price_details"]["min_fare_applied"] = True
+                result["price_details"]["min_fare_value"] = distance_min_fare
+                logger.info(f"Distance-based minimum fare applied: {distance_min_fare} {config.currency}")
+            
+            result["price"] = price
+            return price, result["currency"]
         
-        # 2. Calculate route and distance
-        total_distance = calculate_distance(
-            (pickup_lat, pickup_lng),
-            (dropoff_lat, dropoff_lng)
-        )
-        
-        result["price_details"]["total_distance_km"] = total_distance
-        
-        # 3. Determine which zones the route passes through
+        # 4. Determine which zones the route passes through
         try:
             route_segments = calculate_route_segments(
                 (pickup_lat, pickup_lng),
                 (dropoff_lat, dropoff_lng),
-                num_segments=20  # Increased from 10 for better accuracy
+                num_segments=20
             )
             
             zones_crossed = determine_zones_crossed(route_segments, geo_data)
@@ -127,7 +149,7 @@ def calculate_price(
             zones_crossed = {"DEFAULT": total_distance}
             result["price_details"]["zones_crossed"] = ["DEFAULT"]
         
-        # 4. Calculate base price based on vehicle category and distance
+        # 5. Calculate base price based on vehicle category and distance
         if vehicle_category not in config.vehicle_rates:
             logger.warning(f"Unknown vehicle category: {vehicle_category}, using default")
             vehicle_category = next(iter(config.vehicle_rates.keys()))
@@ -135,7 +157,7 @@ def calculate_price(
         base_rate = config.vehicle_rates[vehicle_category]
         result["price_details"]["base_rate_per_km"] = base_rate
         
-        # 5. Apply zone multipliers from the database
+        # 6. Apply zone multipliers from the database
         price = 0.0
         
         for zone_code, distance in zones_crossed.items():
@@ -155,7 +177,7 @@ def calculate_price(
         
         result["price_details"]["base_price"] = price
         
-        # 6. Apply time-based multipliers
+        # 7. Apply time-based multipliers
         weekday = pickup_time.weekday()
         hour = pickup_time.hour
         
@@ -174,7 +196,7 @@ def calculate_price(
         price *= time_multiplier
         result["price_details"]["time_multiplier"] = time_multiplier
         
-        # 7. Apply any surge multipliers based on time
+        # 8. Apply any surge multipliers based on time
         current_surge = 1.0
         applied_surge_name = None
         
@@ -195,13 +217,12 @@ def calculate_price(
         if applied_surge_name:
             result["price_details"]["applied_surge"] = applied_surge_name
         
-        # 8. Apply minimum fare if needed
-        min_fare = config.min_fares.get(vehicle_category, 0)
-        if price < min_fare:
-            logger.info(f"Applying minimum fare: {min_fare} {config.currency}")
-            price = min_fare
+        # 9. Apply distance-based minimum fare if needed
+        if price < distance_min_fare:
+            logger.info(f"Applying distance-based minimum fare: {distance_min_fare} {config.currency}")
+            price = distance_min_fare
             result["price_details"]["min_fare_applied"] = True
-            result["price_details"]["min_fare_value"] = min_fare
+            result["price_details"]["min_fare_value"] = distance_min_fare
         
         # Round to 2 decimal places
         price = round(price, 2)

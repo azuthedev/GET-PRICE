@@ -59,6 +59,7 @@ class Config:
         self.surge_multipliers = self._load_or_create_config('surge_multipliers.json', self._default_surge_multipliers())
         self.fixed_prices = supabase_fixed_prices if supabase_fixed_prices else self._load_or_create_config('fixed_prices.json', self._default_fixed_prices())
         self.min_fares = self._load_or_create_config('min_fares.json', self._default_min_fares())
+        self.distance_based_min_fares = self._load_or_create_config('distance_based_min_fares.json', self._default_distance_based_min_fares())
     
     def _load_or_create_config(self, filename: str, default_config: Any) -> Any:
         """
@@ -89,11 +90,23 @@ class Config:
     def _default_vehicle_rates(self) -> Dict[str, float]:
         """Default base rates per km for each vehicle category"""
         return {
-            "economy": 1.5,
-            "standard": 2.0,
-            "business": 3.0,
-            "premium": 4.0,
-            "van": 3.5
+            # Sedans
+            "standard_sedan": 2.6,
+            "premium_sedan": 3.0,
+            "vip_sedan": 4.0,
+            
+            # Minivans
+            "standard_minivan": 3.0,
+            "xl_minivan": 3.4,
+            "vip_minivan": 3.6,
+            
+            # Sprinters
+            "sprinter_8_pax": 4.6,
+            "sprinter_16_pax": 7.4,
+            "sprinter_21_pax": 11.2,
+            
+            # Coach
+            "coach_51_pax": 20.0
         }
     
     def _default_zone_multipliers(self) -> Dict[str, float]:
@@ -134,7 +147,7 @@ class Config:
         return [
             {
                 "name": "Rome Airport to City Center",
-                "vehicle_category": "economy",
+                "vehicle_category": "standard_sedan",
                 "pickup_area": {
                     "type": "Polygon",
                     "coordinates": [[[12.2, 41.7], [12.3, 41.7], [12.3, 41.8], [12.2, 41.8], [12.2, 41.7]]]
@@ -148,7 +161,7 @@ class Config:
             },
             {
                 "name": "Milan Airport to City Center",
-                "vehicle_category": "economy",
+                "vehicle_category": "standard_sedan",
                 "pickup_area": {
                     "type": "Polygon",
                     "coordinates": [[[9.0, 45.3], [9.1, 45.3], [9.1, 45.4], [9.0, 45.4], [9.0, 45.3]]]
@@ -165,11 +178,88 @@ class Config:
     def _default_min_fares(self) -> Dict[str, float]:
         """Default minimum fares for each vehicle category"""
         return {
-            "economy": 10.0,
-            "standard": 15.0,
-            "business": 25.0,
-            "premium": 35.0,
-            "van": 30.0
+            # Sedans
+            "standard_sedan": 65.0,
+            "premium_sedan": 70.0,
+            "vip_sedan": 120.0,
+            
+            # Minivans
+            "standard_minivan": 75.0,
+            "xl_minivan": 80.0,
+            "vip_minivan": 85.0,
+            
+            # Sprinters
+            "sprinter_8_pax": 120.0,
+            "sprinter_16_pax": 180.0,
+            "sprinter_21_pax": 300.0,
+            
+            # Coach
+            "coach_51_pax": 500.0
+        }
+    
+    def _default_distance_based_min_fares(self) -> Dict[str, Dict[str, Dict[str, float]]]:
+        """Default distance-based minimum fares for each vehicle category"""
+        return {
+            # 0 to 5 km
+            "0-5": {
+                # Sedans
+                "standard_sedan": 65.0,
+                "premium_sedan": 70.0,
+                "vip_sedan": 120.0,
+                
+                # Minivans
+                "standard_minivan": 75.0,
+                "xl_minivan": 80.0,
+                "vip_minivan": 85.0,
+                
+                # Sprinters
+                "sprinter_8_pax": 120.0,
+                "sprinter_16_pax": 180.0,
+                "sprinter_21_pax": 300.0,
+                
+                # Coach
+                "coach_51_pax": 500.0
+            },
+            # 5 to 20 km
+            "5-20": {
+                # Sedans
+                "standard_sedan": 90.0,
+                "premium_sedan": 100.0,
+                "vip_sedan": 150.0,
+                
+                # Minivans
+                "standard_minivan": 100.0,
+                "xl_minivan": 110.0,
+                "vip_minivan": 120.0,
+                
+                # Sprinters
+                "sprinter_8_pax": 190.0,
+                "sprinter_16_pax": 240.0,
+                "sprinter_21_pax": 360.0,
+                
+                # Coach
+                "coach_51_pax": 600.0
+            },
+            # 20 to 50 km
+            "20-50": {
+                # Sedans
+                "standard_sedan": 120.0,
+                "premium_sedan": 130.0,
+                "vip_sedan": 200.0,
+                
+                # Minivans
+                "standard_minivan": 125.0,
+                "xl_minivan": 135.0,
+                "vip_minivan": 145.0,
+                
+                # Sprinters
+                "sprinter_8_pax": 220.0,
+                "sprinter_16_pax": 300.0,
+                "sprinter_21_pax": 400.0,
+                
+                # Coach
+                "coach_51_pax": 800.0
+            }
         }
         
     def validate_config(self) -> None:
