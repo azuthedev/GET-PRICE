@@ -111,9 +111,9 @@ class Config:
     def _default_zone_multipliers(self) -> Dict[str, float]:
         """Default multipliers for each zone/province"""
         return {
-            "RM": 1.2,  # Rome
-            "MI": 1.3,  # Milan
-            "FI": 1.1,  # Florence
+            "RM": 1.0,  # Rome
+            "MI": 1.0,  # Milan
+            "FI": 1.0,  # Florence
             "DEFAULT": 1.0  # Default for zones not specifically configured
         }
     

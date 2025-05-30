@@ -13,6 +13,8 @@ A FastAPI-based pricing engine for calculating airport/city transfer prices.
 - Spatial indexing for efficient zone lookups
 - Support for time-based pricing (night/weekend/holiday rates)
 - Price rounding to the nearest 10 EUR
+- Supabase integration for pricing configuration
+- Multiple routing providers (Google Maps, Mapbox) with fallbacks
 
 ## API Endpoints
 
@@ -55,48 +57,6 @@ Response:
       "raw_price": 120,
       "currency": "EUR",
       "price": 120
-    },
-    {
-      "category": "standard_minivan",
-      "raw_price": 75,
-      "currency": "EUR",
-      "price": 80
-    },
-    {
-      "category": "xl_minivan",
-      "raw_price": 80,
-      "currency": "EUR",
-      "price": 80
-    },
-    {
-      "category": "vip_minivan",
-      "raw_price": 85,
-      "currency": "EUR",
-      "price": 90
-    },
-    {
-      "category": "sprinter_8_pax",
-      "raw_price": 120,
-      "currency": "EUR",
-      "price": 120
-    },
-    {
-      "category": "sprinter_16_pax",
-      "raw_price": 180,
-      "currency": "EUR",
-      "price": 180
-    },
-    {
-      "category": "sprinter_21_pax",
-      "raw_price": 300,
-      "currency": "EUR",
-      "price": 300
-    },
-    {
-      "category": "coach_51_pax",
-      "raw_price": 500,
-      "currency": "EUR",
-      "price": 500
     }
   ],
   "details": {
@@ -157,17 +117,71 @@ Response:
 }
 ```
 
+### Refresh Configuration
+
+```
+POST /refresh-config
+```
+
+Response:
+```json
+{
+  "status": "success",
+  "message": "Configuration refreshed"
+}
+```
+
 ## Configuration
 
-All pricing configuration is stored in JSON files in the `config/` directory:
+Configuration can be stored in:
+
+1. **Supabase Database** (primary source if enabled)
+2. **JSON files** (fallback if Supabase is disabled or unavailable)
+
+### Supabase Tables
+
+The pricing engine uses the following tables in Supabase:
+
+- `vehicle_base_prices`: Base rates per km for each vehicle category
+- `zone_multipliers`: Multipliers for different geographical zones
+- `zones`: Geographical zones with province codes (prov_acr)
+- `fixed_routes`: Fixed price overrides for specific routes
+
+### Local Configuration Files
+
+Fallback JSON files in the `config/` directory:
 
 - `vehicle_rates.json`: Base rates per km for each vehicle category
 - `zone_multipliers.json`: Multipliers for different geographical zones
 - `time_multipliers.json`: Multipliers for different time periods (night, weekend)
-- `surge_multipliers.json`: Special surge pricing for holidays and events
 - `fixed_prices.json`: Fixed price overrides for specific routes
 - `min_fares.json`: Minimum fare for each vehicle category
 - `distance_based_min_fares.json`: Minimum fares based on distance ranges
+
+## Supabase Setup
+
+1. Set the environment variables:
+   - `SUPABASE_URL`: Your Supabase project URL
+   - `SUPABASE_SERVICE_KEY`: Your Supabase service role API key
+
+2. Run the setup script to create necessary tables and functions:
+   ```
+   python setup_supabase.py
+   ```
+
+3. Use the admin panel to manage pricing configuration:
+   ```
+   streamlit run admin_panel_example.py
+   ```
+
+## Environment Variables
+
+- `SUPABASE_URL`: Supabase project URL
+- `SUPABASE_SERVICE_KEY`: Supabase service role API key
+- `GOOGLE_MAPS_API_KEY`: Google Maps API key for routing
+- `MAPBOX_API_KEY`: Mapbox API key (fallback routing)
+- `DEFAULT_CURRENCY`: Currency for prices (default: EUR)
+- `GEOJSON_PATH`: Path to GeoJSON file with zone data
 
 ## Development
 
@@ -180,7 +194,8 @@ All pricing configuration is stored in JSON files in the `config/` directory:
 
 1. Clone the repository
 2. Install dependencies: `pip install -r requirements.txt`
-3. Run the API: `python main.py`
+3. Set up environment variables
+4. Run the API: `python main.py`
 
 ### Docker
 
@@ -188,7 +203,7 @@ Build and run with Docker:
 
 ```
 docker build -t transfer-pricing-api .
-docker run -p 8080:8080 transfer-pricing-api
+docker run -p 8080:8080 -e SUPABASE_URL=your-url -e SUPABASE_SERVICE_KEY=your-key -e GOOGLE_MAPS_API_KEY=your-key transfer-pricing-api
 ```
 
 ## Deployment
@@ -197,4 +212,4 @@ This API is designed to be deployed on Google Cloud Run.
 
 1. Build the Docker image
 2. Push to Google Container Registry
-3. Deploy to Cloud Run
+3. Deploy to Cloud Run with appropriate environment variables

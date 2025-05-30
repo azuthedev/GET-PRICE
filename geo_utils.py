@@ -160,6 +160,84 @@ def calculate_distance(pickup: Tuple[float, float], dropoff: Tuple[float, float]
     # In production, consider using OSRM for more accurate driving distance
     return haversine_distance(pickup, dropoff)
 
+def get_google_maps_route(
+    pickup: Tuple[float, float],
+    dropoff: Tuple[float, float],
+    depart_at: str = None
+) -> Dict[str, Any]:
+    """
+    Get route information from Google Maps Directions API
+    
+    Args:
+        pickup: (latitude, longitude) of pickup
+        dropoff: (latitude, longitude) of dropoff
+        depart_at: ISO format datetime string for departure time
+    
+    Returns:
+        Dictionary with route information including distance, duration, and geometry
+    """
+    try:
+        google_maps_api_key = os.getenv("GOOGLE_MAPS_API_KEY")
+        
+        if not google_maps_api_key:
+            logger.error("GOOGLE_MAPS_API_KEY not found in environment variables")
+            return None
+        
+        # Format coordinates
+        pickup_str = f"{pickup[0]},{pickup[1]}"
+        dropoff_str = f"{dropoff[0]},{dropoff[1]}"
+        
+        # Build URL
+        base_url = "https://maps.googleapis.com/maps/api/directions/json"
+        
+        params = {
+            "origin": pickup_str,
+            "destination": dropoff_str,
+            "mode": "driving",
+            "units": "metric",
+            "key": google_maps_api_key
+        }
+        
+        # Add departure time if provided
+        if depart_at:
+            try:
+                # Convert ISO string to unix timestamp
+                from datetime import datetime
+                dt = datetime.fromisoformat(depart_at.replace('Z', '+00:00'))
+                unix_time = int(dt.timestamp())
+                params["departure_time"] = unix_time
+            except Exception as e:
+                logger.warning(f"Could not parse departure time: {e}")
+        
+        response = requests.get(base_url, params=params)
+        
+        if response.status_code != 200:
+            logger.error(f"Google Maps API error: {response.status_code} - {response.text}")
+            return None
+        
+        data = response.json()
+        
+        if data.get("status") != "OK" or not data.get("routes") or len(data["routes"]) == 0:
+            logger.error(f"No routes found in Google Maps response: {data.get('status')}")
+            return None
+        
+        route = data["routes"][0]
+        leg = route["legs"][0]
+        
+        # Extract polyline from the route
+        encoded_polyline = route["overview_polyline"]["points"]
+        
+        return {
+            "distance": leg["distance"]["value"] / 1000,  # Convert meters to kilometers
+            "duration": leg["duration"]["value"] / 60,    # Convert seconds to minutes
+            "geometry": encoded_polyline,
+            "source": "google_maps"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting Google Maps route: {str(e)}")
+        return None
+
 def get_mapbox_route(
     pickup: Tuple[float, float],
     dropoff: Tuple[float, float],
@@ -222,28 +300,80 @@ def get_mapbox_route(
         return {
             "distance": route["distance"] / 1000,  # Convert meters to kilometers
             "duration": route["duration"] / 60,    # Convert seconds to minutes
-            "geometry": route["geometry"]
+            "geometry": route["geometry"],
+            "source": "mapbox"
         }
         
     except Exception as e:
         logger.error(f"Error getting Mapbox route: {str(e)}")
         return None
 
+def get_route_with_fallbacks(
+    pickup: Tuple[float, float],
+    dropoff: Tuple[float, float],
+    depart_at: str = None
+) -> Dict[str, Any]:
+    """
+    Get route information with fallback mechanisms:
+    1. Try Google Maps Directions API
+    2. If that fails, try Mapbox API
+    3. If both fail, fall back to direct haversine distance
+    
+    Args:
+        pickup: (latitude, longitude) of pickup
+        dropoff: (latitude, longitude) of dropoff
+        depart_at: ISO format datetime string for departure time
+    
+    Returns:
+        Dictionary with route information including distance, duration, geometry, and source
+    """
+    # Try Google Maps first
+    google_route = get_google_maps_route(pickup, dropoff, depart_at)
+    if google_route:
+        logger.info("Successfully retrieved route from Google Maps API")
+        return google_route
+    
+    # If Google Maps fails, try Mapbox
+    mapbox_route = get_mapbox_route(pickup, dropoff, depart_at)
+    if mapbox_route:
+        logger.info("Successfully retrieved route from Mapbox API (Google Maps failed)")
+        return mapbox_route
+    
+    # If both APIs fail, use haversine distance and linear interpolation
+    logger.error(
+        f"Both Google Maps and Mapbox APIs failed to get route from {pickup} to {dropoff}. "
+        "Falling back to direct haversine distance."
+    )
+    
+    direct_distance = haversine_distance(pickup, dropoff)
+    
+    # Create a fallback response
+    return {
+        "distance": direct_distance,
+        "duration": direct_distance * 1.5,  # Rough estimate: 1.5 minutes per km
+        "geometry": None,
+        "source": "haversine_fallback",
+        "error": "Both Google Maps and Mapbox APIs failed"
+    }
+
 def decode_polyline_to_coordinates(encoded_polyline: str) -> List[Tuple[float, float]]:
     """
     Decode a polyline string to a list of coordinates
     
     Args:
-        encoded_polyline: Encoded polyline string from Mapbox
+        encoded_polyline: Encoded polyline string from Google Maps or Mapbox
     
     Returns:
         List of (latitude, longitude) tuples
     """
     try:
+        if not encoded_polyline:
+            return []
+            
         # Decode polyline
         coords = polyline.decode(encoded_polyline)
         
-        # Mapbox returns coordinates as (lat, lng)
+        # Both Google Maps and Mapbox return coordinates as (lat, lng)
         return coords
         
     except Exception as e:
@@ -274,7 +404,7 @@ def calculate_route_segments(
     pickup: Tuple[float, float], 
     dropoff: Tuple[float, float], 
     num_segments: int = 10,
-    use_mapbox: bool = True,
+    use_routing_apis: bool = True,
     depart_at: str = None
 ) -> List[Tuple[float, float]]:
     """
@@ -284,7 +414,7 @@ def calculate_route_segments(
         pickup: (latitude, longitude) of pickup
         dropoff: (latitude, longitude) of dropoff
         num_segments: Number of segments to create
-        use_mapbox: Whether to use Mapbox API for routing
+        use_routing_apis: Whether to use routing APIs (Google Maps, then Mapbox)
         depart_at: ISO format datetime string for departure time
         
     Returns:
@@ -298,23 +428,23 @@ def calculate_route_segments(
     if haversine_distance(pickup, dropoff) < 0.1:  # Less than 100 meters
         return [pickup, dropoff]
     
-    # Try using Mapbox API if requested
-    if use_mapbox:
+    # Try using routing APIs if requested
+    if use_routing_apis:
         try:
-            mapbox_route = get_mapbox_route(pickup, dropoff, depart_at)
+            route = get_route_with_fallbacks(pickup, dropoff, depart_at)
             
-            if mapbox_route and mapbox_route.get("geometry"):
-                route_points = decode_polyline_to_coordinates(mapbox_route["geometry"])
+            if route and route.get("geometry"):
+                route_points = decode_polyline_to_coordinates(route["geometry"])
                 
                 if route_points and len(route_points) > 1:
-                    logger.info(f"Using Mapbox route with {len(route_points)} points")
+                    logger.info(f"Using {route['source']} route with {len(route_points)} points")
                     return route_points
                 else:
-                    logger.warning("Mapbox returned empty or invalid route, falling back to linear interpolation")
+                    logger.warning(f"{route['source']} returned empty or invalid route, falling back to linear interpolation")
             else:
-                logger.warning("No valid geometry found in Mapbox response, falling back to linear interpolation")
+                logger.warning("No valid geometry found in route response, falling back to linear interpolation")
         except Exception as e:
-            logger.error(f"Error using Mapbox routing: {str(e)}, falling back to linear interpolation")
+            logger.error(f"Error using routing APIs: {str(e)}, falling back to linear interpolation")
     
     # Fallback to linear interpolation
     logger.info("Using linear interpolation for route")

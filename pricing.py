@@ -9,7 +9,7 @@ from geo_utils import (
     determine_zones_crossed, 
     calculate_route_segments,
     check_fixed_price,
-    get_mapbox_route
+    get_route_with_fallbacks
 )
 
 logger = logging.getLogger(__name__)
@@ -92,11 +92,11 @@ def calculate_price(
             result["price_details"]["fixed_price_applied"] = True
             return result["price"], result["currency"]
         
-        # Format pickup_time for Mapbox API
+        # Format pickup_time for routing APIs
         depart_at = pickup_time.strftime("%Y-%m-%dT%H:%M")
         
-        # 1. Get route information from Mapbox
-        mapbox_route = get_mapbox_route(
+        # 1. Get route information from Google Maps (with fallbacks to Mapbox and Haversine)
+        route_info = get_route_with_fallbacks(
             (pickup_lat, pickup_lng),
             (dropoff_lat, dropoff_lng),
             depart_at=depart_at
@@ -106,23 +106,40 @@ def calculate_price(
         total_distance = 0
         route_points = []
         
-        # If we got a valid Mapbox route, use its distance
-        if mapbox_route and 'distance' in mapbox_route:
-            total_distance = mapbox_route['distance']  # Already in kilometers
-            result["price_details"]["mapbox_distance_used"] = True
-            result["price_details"]["estimated_duration_min"] = mapbox_route.get('duration', 0)
+        # If we got valid route info, use it
+        if route_info:
+            total_distance = route_info['distance']  # Already in kilometers
+            result["price_details"]["route_source"] = route_info.get('source', 'unknown')
+            result["price_details"]["estimated_duration_min"] = route_info.get('duration', 0)
             
             # Get route points for zone calculations
-            if 'geometry' in mapbox_route:
+            if route_info.get('geometry'):
                 route_points = calculate_route_segments(
                     (pickup_lat, pickup_lng),
                     (dropoff_lat, dropoff_lng),
-                    use_mapbox=True,
+                    use_routing_apis=True,
                     depart_at=depart_at
                 )
-                result["price_details"]["mapbox_route_points"] = len(route_points)
+                result["price_details"]["route_points_count"] = len(route_points)
+            else:
+                # Fallback to direct distance calculation and interpolation
+                logger.warning("No route geometry available, using linear interpolation")
+                total_distance = calculate_distance(
+                    (pickup_lat, pickup_lng),
+                    (dropoff_lat, dropoff_lng)
+                )
+                result["price_details"]["direct_distance_used"] = True
+                
+                # Get route points through interpolation
+                route_points = calculate_route_segments(
+                    (pickup_lat, pickup_lng),
+                    (dropoff_lat, dropoff_lng),
+                    num_segments=20,
+                    use_routing_apis=False
+                )
         else:
-            # Fallback to direct distance calculation
+            # Complete fallback if no route info at all
+            logger.error("No route information available, using direct distance")
             total_distance = calculate_distance(
                 (pickup_lat, pickup_lng),
                 (dropoff_lat, dropoff_lng)
@@ -134,14 +151,14 @@ def calculate_price(
                 (pickup_lat, pickup_lng),
                 (dropoff_lat, dropoff_lng),
                 num_segments=20,
-                use_mapbox=False
+                use_routing_apis=False
             )
         
         # Store one-way distance for reference
         one_way_distance = total_distance
         result["price_details"]["one_way_distance_km"] = one_way_distance
         
-        # 3. Determine which zones the route passes through (before applying round trip)
+        # 2. Determine which zones the route passes through (before applying round trip)
         try:
             # Use the route points we already obtained
             zones_crossed = determine_zones_crossed(route_points, geo_data)
@@ -158,24 +175,6 @@ def calculate_price(
             result["price_details"]["round_trip_applied"] = True
             
         result["price_details"]["total_distance_km"] = total_distance
-        
-        # 2. Check for distance-based minimum fare
-        min_fare = config.min_fares.get(vehicle_category, 10.0)
-        
-        # Apply distance-based minimum fares based on one_way_distance
-        if one_way_distance <= 5:
-            distance_min_fare = config.distance_based_min_fares.get("0-5", {}).get(vehicle_category, min_fare)
-        elif one_way_distance <= 20:
-            distance_min_fare = config.distance_based_min_fares.get("5-20", {}).get(vehicle_category, min_fare)
-        elif one_way_distance <= 50:
-            distance_min_fare = config.distance_based_min_fares.get("20-50", {}).get(vehicle_category, min_fare)
-        else:
-            distance_min_fare = min_fare  # Use regular min fare for distances > 50km
-            
-        # Double the minimum fare for round trips
-        if trip_type == "2":
-            distance_min_fare *= 2
-            result["price_details"]["min_fare_doubled"] = True
         
         # 3. Check for fixed price override
         fixed_price = check_fixed_price(
@@ -196,6 +195,9 @@ def calculate_price(
                 
             result["price_details"]["fixed_price_applied"] = True
             
+            # Get distance-based minimum fare
+            distance_min_fare = get_distance_based_min_fare(one_way_distance, vehicle_category, config, trip_type)
+            
             # Compare with distance-based minimum fare
             if price < distance_min_fare:
                 price = distance_min_fare
@@ -206,7 +208,7 @@ def calculate_price(
             result["price"] = price
             return price, result["currency"]
         
-        # 5. Calculate base price based on vehicle category and distance
+        # 4. Calculate base price based on vehicle category and distance
         if vehicle_category not in config.vehicle_rates:
             logger.warning(f"Unknown vehicle category: {vehicle_category}, using default")
             vehicle_category = next(iter(config.vehicle_rates.keys()))
@@ -214,7 +216,7 @@ def calculate_price(
         base_rate = config.vehicle_rates[vehicle_category]
         result["price_details"]["base_rate_per_km"] = base_rate
         
-        # 6. Apply zone multipliers from the database
+        # 5. Apply zone multipliers from the database
         price = 0.0
         
         for zone_code, distance in zones_crossed.items():
@@ -242,7 +244,9 @@ def calculate_price(
         
         # Time-based multipliers removed as requested
         
-        # 9. Apply distance-based minimum fare if needed
+        # 6. Apply distance-based minimum fare if needed
+        distance_min_fare = get_distance_based_min_fare(one_way_distance, vehicle_category, config, trip_type)
+        
         if price < distance_min_fare:
             logger.info(f"Applying distance-based minimum fare: {distance_min_fare} {config.currency}")
             price = distance_min_fare
@@ -268,3 +272,47 @@ def calculate_price(
             pass
         
         return min_fare, config.currency
+
+def get_distance_based_min_fare(
+    distance: float,
+    vehicle_category: str,
+    config: Config,
+    trip_type: str = "1"
+) -> float:
+    """
+    Determine the appropriate minimum fare based on distance tier
+    
+    Args:
+        distance: One-way distance in kilometers
+        vehicle_category: Type of vehicle
+        config: Configuration object
+        trip_type: "1" for one-way, "2" for round trip
+        
+    Returns:
+        Minimum fare applicable for the distance and vehicle
+    """
+    # Default minimum fare as fallback
+    default_min_fare = config.min_fares.get(vehicle_category, 10.0)
+    
+    # Determine the appropriate distance tier
+    if distance <= 5:
+        tier = "0-5"
+    elif distance <= 20:
+        tier = "5-20"
+    elif distance <= 50:
+        tier = "20-50"
+    else:
+        # For distances > 50km, use the regular minimum fare
+        tier = None
+    
+    # Get the distance-based minimum fare if available
+    if tier and tier in config.distance_based_min_fares:
+        min_fare = config.distance_based_min_fares[tier].get(vehicle_category, default_min_fare)
+    else:
+        min_fare = default_min_fare
+    
+    # Double for round trips
+    if trip_type == "2":
+        min_fare *= 2
+    
+    return min_fare
