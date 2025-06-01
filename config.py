@@ -189,10 +189,10 @@ class Config:
                 "premium_sedan": 80.0,
                 "vip_sedan": 120.0,
                 
-                # Minivans
-                "standard_minivan": 75.0,
-                "xl_minivan": 80.0,
-                "vip_minivan": 85.0,
+                # Minivans - Updated for proper price hierarchy
+                "standard_minivan": 80.0,  # Keep at 80
+                "xl_minivan": 90.0,        # Update to 90
+                "vip_minivan": 100.0,      # Update to 100
                 
                 # Sprinters
                 "sprinter_8_pax": 120.0,
@@ -209,7 +209,7 @@ class Config:
                 "premium_sedan": 100.0,
                 "vip_sedan": 150.0,
                 
-                # Minivans
+                # Minivans - Updated for proper price hierarchy
                 "standard_minivan": 100.0,
                 "xl_minivan": 110.0,
                 "vip_minivan": 120.0,
@@ -229,7 +229,7 @@ class Config:
                 "premium_sedan": 130.0,
                 "vip_sedan": 200.0,
                 
-                # Minivans
+                # Minivans - Updated for proper price hierarchy
                 "standard_minivan": 125.0,
                 "xl_minivan": 135.0,
                 "vip_minivan": 145.0,

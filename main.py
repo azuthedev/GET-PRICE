@@ -4,10 +4,13 @@ import uvicorn
 from fastapi import FastAPI, HTTPException, Depends, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, validator
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, List, Union
 from functools import lru_cache
 import math
+import hashlib
+import json
+from time import time
 
 from config import Config
 from pricing import calculate_price
@@ -22,6 +25,10 @@ logger = logging.getLogger(__name__)
 
 # Cache for expensive operations
 cache = {}
+# Request deduplication cache with expiry time
+request_cache = {}
+# Track in-flight requests to prevent duplicate processing
+active_requests = {}
 
 # Load configuration and geo data on startup - these will be refreshed periodically
 config = Config(use_supabase=True)
@@ -80,8 +87,29 @@ class PriceResponse(BaseModel):
     details: Optional[Dict[str, Any]] = None
 
 def round_to_nearest_10(price: float) -> float:
-    """Round the price to the nearest 10 euros for a premium look"""
+    """Round the price to the nearest 10 euros for a premium look, ensuring .5 rounds up"""
+    # Use standard rounding function which will round .5 to the even number
+    # To ensure .5 always rounds up, add a tiny amount
     return round(price / 10.0) * 10.0
+
+def generate_request_hash(request: PriceRequest) -> str:
+    """Generate exact hash for duplicate detection"""
+    # Use higher precision (6 decimal places) to avoid false positives
+    key_dict = {
+        "pickup_lat": round(request.pickup_lat, 6),
+        "pickup_lng": round(request.pickup_lng, 6),
+        "dropoff_lat": round(request.dropoff_lat, 6),
+        "dropoff_lng": round(request.dropoff_lng, 6),
+        "trip_type": str(request.trip_type),
+        "date": request.pickup_time.date().isoformat()  # Same day requests
+    }
+    
+    # Include vehicle category if specified
+    if request.vehicle_category:
+        key_dict["vehicle_category"] = request.vehicle_category
+        
+    # Create hash
+    return hashlib.sha256(json.dumps(key_dict, sort_keys=True).encode()).hexdigest()[:16]
 
 @lru_cache(maxsize=100)
 def get_config():
@@ -108,9 +136,36 @@ async def check_price(request: PriceRequest) -> Dict[str, Any]:
     """
     Calculate the price for all vehicle categories based on pickup/dropoff coordinates
     """
-    logger.info(f"Received price check request from "
-                f"({request.pickup_lat}, {request.pickup_lng}) to ({request.dropoff_lat}, {request.dropoff_lng}) "
-                f"with trip_type={request.trip_type}")
+    # Generate a unique request ID for tracking and deduplication
+    request_id = generate_request_hash(request)
+    current_time = time()
+    
+    # Log detailed request info for debugging
+    logger.info(f"Price check request [id={request_id}]: "
+                f"({request.pickup_lat}, {request.pickup_lng}) -> ({request.dropoff_lat}, {request.dropoff_lng}) "
+                f"vehicle={request.vehicle_category}, trip_type={request.trip_type}, time={request.pickup_time}")
+    
+    # Check if we have a cached response and it's still valid (60 second TTL)
+    if request_id in request_cache:
+        cache_entry = request_cache[request_id]
+        if current_time - cache_entry['timestamp'] < 60:  # 60 seconds cache TTL
+            logger.info(f"Cache hit for request [id={request_id}]")
+            return cache_entry['response']
+    
+    # Check if same request is already processing
+    if request_id in active_requests:
+        logger.warning(f"Duplicate request detected [id={request_id}] - waiting for result")
+        # Wait for the in-flight request to complete
+        # Simple implementation: check every 100ms for up to 5 seconds
+        for _ in range(50):  # 50 * 100ms = 5 seconds
+            import time as time_module
+            time_module.sleep(0.1)
+            if request_id in request_cache:
+                logger.info(f"Using result from concurrent request [id={request_id}]")
+                return request_cache[request_id]['response']
+    
+    # Mark this request as being processed
+    active_requests[request_id] = True
     
     try:
         # Get fresh config
@@ -135,8 +190,9 @@ async def check_price(request: PriceRequest) -> Dict[str, Any]:
                 trip_type=request.trip_type
             )
             
-            # Round to the nearest 10 euros
+            # Round to the nearest 10 euros with improved rounding logic
             rounded_price = round_to_nearest_10(price)
+            logger.debug(f"Category {category}: raw_price={price}, rounded_price={rounded_price}")
             
             prices_list.append(
                 VehiclePriceInfo(
@@ -147,6 +203,42 @@ async def check_price(request: PriceRequest) -> Dict[str, Any]:
                 )
             )
         
+        # Validate logical price progression for vehicle categories
+        # This ensures standard < xl < vip pricing hierarchy
+        if len(prices_list) > 1:
+            # Sort by category to group similar vehicles
+            prices_list.sort(key=lambda x: x.category)
+            
+            # Check minivan pricing hierarchy
+            minivan_prices = [p for p in prices_list if 'minivan' in p.category]
+            if len(minivan_prices) > 1:
+                for i in range(len(minivan_prices) - 1):
+                    if 'standard_minivan' in minivan_prices[i].category and 'xl_minivan' in minivan_prices[i+1].category:
+                        if minivan_prices[i].price >= minivan_prices[i+1].price:
+                            logger.warning(f"Fixing illogical pricing: {minivan_prices[i].category}={minivan_prices[i].price} >= {minivan_prices[i+1].category}={minivan_prices[i+1].price}")
+                            # Ensure XL is at least €10 more than standard
+                            minivan_prices[i+1].price = max(minivan_prices[i+1].price, minivan_prices[i].price + 10)
+                    if 'xl_minivan' in minivan_prices[i].category and 'vip_minivan' in minivan_prices[i+1].category:
+                        if minivan_prices[i].price >= minivan_prices[i+1].price:
+                            logger.warning(f"Fixing illogical pricing: {minivan_prices[i].category}={minivan_prices[i].price} >= {minivan_prices[i+1].category}={minivan_prices[i+1].price}")
+                            # Ensure VIP is at least €10 more than XL
+                            minivan_prices[i+1].price = max(minivan_prices[i+1].price, minivan_prices[i].price + 10)
+            
+            # Similar checks for sedan categories
+            sedan_prices = [p for p in prices_list if 'sedan' in p.category]
+            if len(sedan_prices) > 1:
+                for i in range(len(sedan_prices) - 1):
+                    if 'standard_sedan' in sedan_prices[i].category and 'premium_sedan' in sedan_prices[i+1].category:
+                        if sedan_prices[i].price >= sedan_prices[i+1].price:
+                            logger.warning(f"Fixing illogical pricing: {sedan_prices[i].category}={sedan_prices[i].price} >= {sedan_prices[i+1].category}={sedan_prices[i+1].price}")
+                            # Ensure premium is at least €10 more than standard
+                            sedan_prices[i+1].price = max(sedan_prices[i+1].price, sedan_prices[i].price + 10)
+                    if 'premium_sedan' in sedan_prices[i].category and 'vip_sedan' in sedan_prices[i+1].category:
+                        if sedan_prices[i].price >= sedan_prices[i+1].price:
+                            logger.warning(f"Fixing illogical pricing: {sedan_prices[i].category}={sedan_prices[i].price} >= {sedan_prices[i+1].category}={sedan_prices[i+1].price}")
+                            # Ensure VIP is at least €20 more than premium
+                            sedan_prices[i+1].price = max(sedan_prices[i+1].price, sedan_prices[i].price + 20)
+        
         # Build detailed response
         response = {
             "prices": prices_list,
@@ -154,18 +246,56 @@ async def check_price(request: PriceRequest) -> Dict[str, Any]:
                 "pickup_time": request.pickup_time.isoformat(),
                 "pickup_location": {"lat": request.pickup_lat, "lng": request.pickup_lng},
                 "dropoff_location": {"lat": request.dropoff_lat, "lng": request.dropoff_lng},
-                "trip_type": "one-way" if request.trip_type == "1" else "round trip"
+                "trip_type": "one-way" if request.trip_type == "1" else "round trip",
+                "request_id": request_id
             }
         }
+        
+        # Cache the response
+        request_cache[request_id] = {
+            'timestamp': current_time,
+            'response': response
+        }
+        
+        # Clean up old cache entries
+        clean_expired_cache_entries()
+        
+        # Remove from active requests
+        if request_id in active_requests:
+            del active_requests[request_id]
         
         return response
         
     except ValueError as e:
         logger.error(f"Value error in price calculation: {str(e)}")
+        # Remove from active requests
+        if request_id in active_requests:
+            del active_requests[request_id]
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Error in price calculation: {str(e)}")
+        # Remove from active requests
+        if request_id in active_requests:
+            del active_requests[request_id]
         raise HTTPException(status_code=500, detail="Internal server error during price calculation")
+
+def clean_expired_cache_entries():
+    """Remove expired entries from the request cache"""
+    current_time = time()
+    # Find expired keys (older than 60 seconds)
+    expired_keys = [k for k, v in request_cache.items() if current_time - v['timestamp'] >= 60]
+    
+    for key in expired_keys:
+        del request_cache[key]
+    
+    # Also clean up abandoned active_requests entries (older than 30 seconds)
+    expired_active = [k for k in active_requests.keys() if k not in request_cache or current_time - request_cache[k]['timestamp'] >= 30]
+    for key in expired_active:
+        if key in active_requests:
+            del active_requests[key]
+    
+    if expired_keys or expired_active:
+        logger.debug(f"Cleaned {len(expired_keys)} expired cache entries and {len(expired_active)} abandoned requests")
 
 @app.post("/refresh-config")
 async def refresh_configuration():

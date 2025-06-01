@@ -271,7 +271,7 @@ def calculate_price(
         except:
             pass
         
-        return min_fare, config.currency
+        return min_fare, result["currency"]
 
 def get_distance_based_min_fare(
     distance: float,
