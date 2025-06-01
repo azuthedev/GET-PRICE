@@ -161,8 +161,8 @@ class Config:
         """Default minimum fares for each vehicle category"""
         return {
             # Sedans
-            "standard_sedan": 65.0,
-            "premium_sedan": 70.0,
+            "standard_sedan": 70.0,
+            "premium_sedan": 80.0,
             "vip_sedan": 120.0,
             
             # Minivans
@@ -185,8 +185,8 @@ class Config:
             # 0 to 5 km
             "0-5": {
                 # Sedans
-                "standard_sedan": 65.0,
-                "premium_sedan": 70.0,
+                "standard_sedan": 70.0,
+                "premium_sedan": 80.0,
                 "vip_sedan": 120.0,
                 
                 # Minivans
