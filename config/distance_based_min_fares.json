@@ -1,7 +1,7 @@
 {
   "0-5": {
-    "standard_sedan": 65.0,
-    "premium_sedan": 70.0,
+    "standard_sedan": 70.0,
+    "premium_sedan": 80.0,
     "vip_sedan": 120.0,
     "standard_minivan": 75.0,
     "xl_minivan": 80.0,
